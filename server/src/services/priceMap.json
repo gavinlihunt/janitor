@@ -1,0 +1,39 @@
+{
+  "vmDailyUsd": {
+    "Standard_D4s_v3": 4.6,
+    "Standard_D2s_v3": 2.3,
+    "Standard_E8s_v3": 12.1,
+    "Standard_B2ms": 2.0,
+    "Standard_B1s": 0.25,
+    "Standard_NC6": 21.6,
+    "_default": 3.0,
+    "_deallocatedDisk": 0.35
+  },
+  "appServicePlanDailyUsd": {
+    "F1": 0,
+    "D1": 0.3,
+    "B1": 1.3,
+    "B2": 2.6,
+    "S1": 2.4,
+    "S2": 4.8,
+    "P1v2": 3.5,
+    "P1v3": 4.0,
+    "P2v3": 8.0,
+    "_default": 2.4
+  },
+  "cosmosUsdPer100RuDay": 0.19,
+  "cosmosDefaultRUs": 1000,
+  "cosmosHibernateFloorRUs": 400,
+  "sqlDailyUsd": {
+    "GP_S_Gen5_2": 1.1,
+    "S0": 0.5,
+    "S1": 1.0,
+    "_default": 1.0
+  },
+  "storageDailyUsd": {
+    "Standard_LRS": 0.12,
+    "Standard_GRS": 0.24,
+    "_default": 0.15
+  },
+  "otherDailyUsd": 0.5
+}
