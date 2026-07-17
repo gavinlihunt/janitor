@@ -18,7 +18,7 @@ export function Header({
   const currency = useCurrency();
 
   return (
-    <header className="flex items-center justify-between border-b bg-card/40 px-6 py-4">
+    <header className="flex h-20 items-center justify-between border-b bg-card/40 px-6">
       <div className="flex items-center gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15">
           <Trash2 className="h-5 w-5 text-primary" />
