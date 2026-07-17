@@ -4,3 +4,9 @@ dist/
 actions.log
 *.local
 .DS_Store
+
+# Local SQLite database (created on first sync)
+data/
+*.db
+*.db-wal
+*.db-shm

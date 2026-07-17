@@ -13,16 +13,18 @@
   "dependencies": {
     "@azure/arm-appservice": "^15.0.0",
     "@azure/arm-compute": "^22.1.0",
-    "@azure/arm-consumption": "^9.2.0",
     "@azure/arm-cosmosdb": "^16.2.0",
+    "@azure/arm-costmanagement": "^1.0.0",
     "@azure/arm-monitor": "^7.0.0",
     "@azure/arm-resources": "^5.2.0",
     "@azure/identity": "^4.4.1",
+    "better-sqlite3": "^12.11.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^20.14.0",

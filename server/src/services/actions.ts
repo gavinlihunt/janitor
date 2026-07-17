@@ -15,7 +15,10 @@ const LOG_PATH = path.join(process.cwd(), 'actions.log');
  * Safety rails: refuse destructive actions on anything tagged
  * protected: true or living in a resource group whose name contains "prod".
  */
-export function assertActionAllowed(r: JanitorResource): void {
+export function assertActionAllowed(r: JanitorResource & { inUse?: boolean }): void {
+  if (r.inUse) {
+    throw new HttpError(403, `Refused: ${r.name} is marked in use`);
+  }
   if ((r.tags['protected'] ?? '').toLowerCase() === 'true') {
     throw new HttpError(403, `Refused: ${r.name} is tagged protected: true`);
   }

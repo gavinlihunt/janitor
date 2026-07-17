@@ -138,7 +138,12 @@ export function riskLevel(score: number): RiskLevel {
   return 'healthy';
 }
 
-export function protection(r: JanitorResource): { isProtected: boolean; reason: string | null } {
+export function protection(
+  r: JanitorResource & { inUse?: boolean }
+): { isProtected: boolean; reason: string | null } {
+  if (r.inUse) {
+    return { isProtected: true, reason: 'Marked in use' };
+  }
   if ((r.tags['protected'] ?? '').toLowerCase() === 'true') {
     return { isProtected: true, reason: 'Tagged protected: true' };
   }

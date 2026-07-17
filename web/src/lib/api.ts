@@ -36,6 +36,8 @@ export interface ScoredResource {
   provisionedRUs?: number;
   hoursRunningPerDay: number;
   estDailyCostUsd: number;
+  /** User-set: excluded from waste and protected from actions. */
+  inUse: boolean;
   estHibernatedDailyCostUsd: number;
   canHibernate: boolean;
   score: number;
@@ -99,6 +101,13 @@ export const api = {
     return request<ScoredResource[]>(`/resources${qs ? `?${qs}` : ''}`);
   },
   activity: (id: string) => request<ActivityEntry[]>(`/activity/${encodeURIComponent(id)}`),
+  sync: () => request<Summary>('/sync', { method: 'POST' }),
+  setInUse: (id: string, inUse: boolean) =>
+    request<{ resource: ScoredResource }>(`/resources/${encodeURIComponent(id)}/in-use`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inUse }),
+    }),
   hibernate: (id: string) =>
     request<{ resource: ScoredResource; reclaimedDailyUsd: number }>(
       `/resources/${encodeURIComponent(id)}/hibernate`,
