@@ -63,6 +63,13 @@ export function DetailSheet({ resource, onClose }: { resource: ScoredResource | 
     };
   }, [resource?.id]);
 
+  const mostRecentEntry =
+    entries && entries.length > 0
+      ? entries.reduce((latest, e) =>
+          new Date(e.timestamp).getTime() > new Date(latest.timestamp).getTime() ? e : latest
+        )
+      : null;
+
   return (
     <Sheet open={!!resource} onOpenChange={(open) => !open && onClose()}>
       <SheetContent className="overflow-y-auto sm:max-w-lg">
@@ -78,6 +85,18 @@ export function DetailSheet({ resource, onClose }: { resource: ScoredResource | 
                 (estimated) · last activity {relativeTime(resource.lastActivity)}
               </SheetDescription>
             </SheetHeader>
+
+            {mostRecentEntry?.caller && (
+              <div className="mt-4 flex items-center justify-between rounded-lg border bg-background/50 px-3 py-2 text-sm">
+                <span className="text-muted-foreground">Most recent action by</span>
+                <span className="font-medium">
+                  {mostRecentEntry.caller}
+                  <span className="ml-1 text-xs font-normal text-muted-foreground">
+                    · {relativeTime(mostRecentEntry.timestamp)}
+                  </span>
+                </span>
+              </div>
+            )}
 
             <Tabs defaultValue="score" className="mt-6">
               <TabsList className="w-full">

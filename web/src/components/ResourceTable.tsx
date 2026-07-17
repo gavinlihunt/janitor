@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { ArrowDown, Lock, Trash2 } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { ArrowDown, ChevronRight, Lock, Trash2 } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -20,9 +20,17 @@ import { AnimatedNumber } from '@/components/AnimatedNumber';
 import { RiskBadge } from '@/components/RiskBadge';
 import { TypeIcon } from '@/components/TypeIcon';
 import { fmtUsd, relativeTime } from '@/lib/format';
-import type { ScoredResource } from '@/lib/api';
+import type { ResourceGroupSummary, RiskLevel, ScoredResource } from '@/lib/api';
 
 export type SortKey = 'score' | 'cost';
+
+const COLUMN_COUNT = 8;
+
+const DOT: Record<RiskLevel, string> = {
+  critical: 'bg-red-500',
+  warning: 'bg-amber-500',
+  healthy: 'bg-emerald-500',
+};
 
 function isHibernated(r: ScoredResource): boolean {
   if (r.kind === 'vm') return r.state === 'deallocated';
@@ -194,8 +202,115 @@ function TeardownCell({
   );
 }
 
+function ResourceRow({
+  resource,
+  removing,
+  onHibernate,
+  onTeardown,
+  onSetInUse,
+  onSelect,
+}: {
+  resource: ScoredResource;
+  removing: boolean;
+  onHibernate: (r: ScoredResource) => Promise<void>;
+  onTeardown: (r: ScoredResource, confirm: string) => Promise<void>;
+  onSetInUse: (r: ScoredResource, inUse: boolean) => Promise<void>;
+  onSelect: (r: ScoredResource) => void;
+}) {
+  return (
+    <TableRow
+      className={`cursor-pointer ${removing ? 'animate-row-out' : ''}`}
+      onClick={() => onSelect(resource)}
+    >
+      <TableCell className="font-medium">
+        <span className="inline-flex items-center gap-1.5 pl-6">
+          {resource.name}
+          {resource.isProtected && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Lock className="h-3 w-3 text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent>{resource.protectedReason}</TooltipContent>
+            </Tooltip>
+          )}
+        </span>
+      </TableCell>
+      <TableCell>
+        <TypeIcon kind={resource.kind} azureType={resource.azureType} />
+      </TableCell>
+      <TableCell className="text-muted-foreground">{resource.sku || '–'}</TableCell>
+      <TableCell className="text-right font-medium">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span>
+              <AnimatedNumber value={resource.estDailyCostUsd} format={fmtUsd} />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>Estimated from a static price map</TooltipContent>
+        </Tooltip>
+      </TableCell>
+      <TableCell className="text-muted-foreground">{relativeTime(resource.lastActivity)}</TableCell>
+      <TableCell>
+        <RiskBadge risk={resource.risk} score={resource.score} />
+      </TableCell>
+      <TableCell className="text-center">
+        <InUseCell resource={resource} onSetInUse={onSetInUse} />
+      </TableCell>
+      <TableCell className="text-right">
+        <span className="inline-flex items-center gap-2">
+          <HibernateCell resource={resource} onHibernate={onHibernate} />
+          <TeardownCell resource={resource} onTeardown={onTeardown} />
+        </span>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function GroupHeaderRow({
+  group,
+  count,
+  open,
+  onToggle,
+}: {
+  group: ResourceGroupSummary;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <TableRow
+      role="button"
+      tabIndex={0}
+      aria-expanded={open}
+      className="cursor-pointer bg-muted/30 hover:bg-muted/50"
+      onClick={onToggle}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onToggle();
+        }
+      }}
+    >
+      <TableCell colSpan={COLUMN_COUNT}>
+        <div className="flex items-center gap-3">
+          <ChevronRight
+            className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-90' : ''}`}
+          />
+          <span className={`h-2 w-2 shrink-0 rounded-full ${DOT[group.worstRisk]}`} />
+          <span className="font-medium">{group.name}</span>
+          <span className="text-xs text-muted-foreground">
+            {count} {count === 1 ? 'resource' : 'resources'}
+          </span>
+          <span className="ml-auto text-sm font-medium">{fmtUsd(group.estDailyCostUsd)}/day</span>
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+}
+
 export function ResourceTable({
   resources,
+  groups,
   loading,
   sort,
   onSortChange,
@@ -206,6 +321,7 @@ export function ResourceTable({
   onSelect,
 }: {
   resources: ScoredResource[];
+  groups: ResourceGroupSummary[];
   loading: boolean;
   sort: SortKey;
   onSortChange: (s: SortKey) => void;
@@ -215,6 +331,26 @@ export function ResourceTable({
   onSetInUse: (r: ScoredResource, inUse: boolean) => Promise<void>;
   onSelect: (r: ScoredResource) => void;
 }) {
+  const [open, setOpen] = useState<Set<string>>(new Set());
+
+  const byGroup = useMemo(() => {
+    const map = new Map<string, ScoredResource[]>();
+    for (const r of resources) {
+      const list = map.get(r.resourceGroup);
+      if (list) list.push(r);
+      else map.set(r.resourceGroup, [r]);
+    }
+    return map;
+  }, [resources]);
+
+  const toggle = (name: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+
   const sortButton = (key: SortKey, label: string) => (
     <button
       className={`inline-flex items-center gap-1 hover:text-foreground ${sort === key ? 'text-foreground' : ''}`}
@@ -232,7 +368,6 @@ export function ResourceTable({
           <TableRow className="hover:bg-transparent">
             <TableHead>Name</TableHead>
             <TableHead className="w-10">Type</TableHead>
-            <TableHead>Resource group</TableHead>
             <TableHead>Tier / SKU</TableHead>
             <TableHead className="text-right">{sortButton('cost', 'Est. cost/day')}</TableHead>
             <TableHead>Last activity</TableHead>
@@ -241,74 +376,55 @@ export function ResourceTable({
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
-        <TableBody>
-          {loading
-            ? Array.from({ length: 8 }, (_, i) => (
-                <TableRow key={i}>
-                  {Array.from({ length: 9 }, (_, j) => (
-                    <TableCell key={j}>
-                      <Skeleton className="h-4 w-full" />
-                    </TableCell>
+        {loading ? (
+          <TableBody>
+            {Array.from({ length: 8 }, (_, i) => (
+              <TableRow key={i}>
+                {Array.from({ length: COLUMN_COUNT }, (_, j) => (
+                  <TableCell key={j}>
+                    <Skeleton className="h-4 w-full" />
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        ) : (
+          groups.map((g) => {
+            const groupResources = byGroup.get(g.name) ?? [];
+            const isOpen = open.has(g.name);
+            return (
+              <TableBody key={g.name}>
+                <GroupHeaderRow
+                  group={g}
+                  count={g.resourceCount}
+                  open={isOpen}
+                  onToggle={() => toggle(g.name)}
+                />
+                {isOpen &&
+                  groupResources.map((r) => (
+                    <ResourceRow
+                      key={r.id}
+                      resource={r}
+                      removing={removingIds.has(r.id)}
+                      onHibernate={onHibernate}
+                      onTeardown={onTeardown}
+                      onSetInUse={onSetInUse}
+                      onSelect={onSelect}
+                    />
                   ))}
-                </TableRow>
-              ))
-            : resources.map((r) => (
-                <TableRow
-                  key={r.id}
-                  className={`cursor-pointer ${removingIds.has(r.id) ? 'animate-row-out' : ''}`}
-                  onClick={() => onSelect(r)}
-                >
-                  <TableCell className="font-medium">
-                    <span className="inline-flex items-center gap-1.5">
-                      {r.name}
-                      {r.isProtected && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Lock className="h-3 w-3 text-muted-foreground" />
-                          </TooltipTrigger>
-                          <TooltipContent>{r.protectedReason}</TooltipContent>
-                        </Tooltip>
-                      )}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <TypeIcon kind={r.kind} azureType={r.azureType} />
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{r.resourceGroup}</TableCell>
-                  <TableCell className="text-muted-foreground">{r.sku || '–'}</TableCell>
-                  <TableCell className="text-right font-medium">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span>
-                          <AnimatedNumber value={r.estDailyCostUsd} format={fmtUsd} />
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>Estimated from a static price map</TooltipContent>
-                    </Tooltip>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{relativeTime(r.lastActivity)}</TableCell>
-                  <TableCell>
-                    <RiskBadge risk={r.risk} score={r.score} />
-                  </TableCell>
-                  <TableCell className="text-center">
-                    <InUseCell resource={r} onSetInUse={onSetInUse} />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <span className="inline-flex items-center gap-2">
-                      <HibernateCell resource={r} onHibernate={onHibernate} />
-                      <TeardownCell resource={r} onTeardown={onTeardown} />
-                    </span>
-                  </TableCell>
-                </TableRow>
-              ))}
-          {!loading && resources.length === 0 && (
+              </TableBody>
+            );
+          })
+        )}
+        {!loading && groups.length === 0 && (
+          <TableBody>
             <TableRow>
-              <TableCell colSpan={9} className="py-10 text-center text-muted-foreground">
-                No resources yet. Click Refresh to import from Azure, or the filter may be too narrow.
+              <TableCell colSpan={COLUMN_COUNT} className="py-10 text-center text-muted-foreground">
+                No resources yet. Click Refresh to import from Azure.
               </TableCell>
             </TableRow>
-          )}
-        </TableBody>
+          </TableBody>
+        )}
       </Table>
     </div>
   );

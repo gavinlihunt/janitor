@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DetailSheet } from '@/components/DetailSheet';
 import { Header } from '@/components/Header';
 import { HeroStrip } from '@/components/HeroStrip';
@@ -10,17 +9,10 @@ import { ResourceTable, type SortKey } from '@/components/ResourceTable';
 import {
   api,
   type ResourceGroupSummary,
-  type RiskLevel,
   type ScoredResource,
   type Summary,
 } from '@/lib/api';
 import { fmtUsd } from '@/lib/format';
-
-const DOT: Record<RiskLevel, string> = {
-  critical: 'bg-red-500',
-  warning: 'bg-amber-500',
-  healthy: 'bg-emerald-500',
-};
 
 export default function Dashboard() {
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -28,7 +20,6 @@ export default function Dashboard() {
   const [resources, setResources] = useState<ScoredResource[]>([]);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<SortKey>('score');
-  const [rg, setRg] = useState<string | null>(null);
   const [selected, setSelected] = useState<ScoredResource | null>(null);
   const [removing, setRemoving] = useState<Set<string>>(new Set());
   const [sessionDailyUsd, setSessionDailyUsd] = useState(0);
@@ -50,7 +41,7 @@ export default function Dashboard() {
       const [s, g, r] = await Promise.all([
         api.summary(),
         api.resourceGroups(),
-        api.resources({ sort, rg }),
+        api.resources({ sort }),
       ]);
       setSummary(s);
       setGroups(g);
@@ -60,7 +51,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [sort, rg]);
+  }, [sort]);
 
   useEffect(() => {
     void loadAll();
@@ -141,39 +132,26 @@ export default function Dashboard() {
       <main className="mx-auto max-w-7xl space-y-6 px-6 py-6">
         <HeroStrip summary={summary} />
 
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <Tabs value={rg ?? 'all'} onValueChange={(v) => setRg(v === 'all' ? null : v)}>
-            <TabsList>
-              <TabsTrigger value="all">All groups</TabsTrigger>
-              {groups.map((g) => (
-                <TabsTrigger key={g.name} value={g.name}>
-                  <span className={`h-2 w-2 rounded-full ${DOT[g.worstRisk]}`} />
-                  {g.name}
-                  <span className="text-xs text-muted-foreground">{fmtUsd(g.estDailyCostUsd)}/d</span>
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
-          <div className="flex items-center gap-3">
-            <p className="text-xs text-muted-foreground">
-              {summary?.estimatesOnly
-                ? 'All figures are estimates from a static price map'
-                : 'Figures from the Azure Consumption API'}
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void handleRefresh()}
-              disabled={refreshing}
-            >
-              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-              {refreshing ? 'Refreshing…' : 'Refresh'}
-            </Button>
-          </div>
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <p className="text-xs text-muted-foreground">
+            {summary?.estimatesOnly
+              ? 'All figures are estimates from a static price map'
+              : 'Figures from the Azure Consumption API'}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleRefresh()}
+            disabled={refreshing}
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </Button>
         </div>
 
         <ResourceTable
           resources={resources}
+          groups={groups}
           loading={loading}
           sort={sort}
           onSortChange={setSort}
