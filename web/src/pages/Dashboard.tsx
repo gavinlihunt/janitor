@@ -361,63 +361,6 @@ export default function Dashboard() {
           )}
         </section>
 
-        {/* App Service drain */}
-        <section className="space-y-3">
-          <div>
-            <h2 className="text-sm font-medium">App Service drain</h2>
-            <p className="text-xs text-muted-foreground">
-              Plans bill for the instance size whether or not any code is running
-            </p>
-          </div>
-          {!data ? (
-            <div className="grid gap-4 lg:grid-cols-2">
-              <Skeleton className="h-56 rounded-xl" />
-              <Skeleton className="h-56 rounded-xl" />
-            </div>
-          ) : (
-            <div className="grid gap-4 lg:grid-cols-2">
-              <LeakCard
-                icon={Server}
-                iconClass="text-red-400"
-                title="Ghost town App Service Plans"
-                count={data.ghostTownPlans.length}
-                description={`Standard tier or above with no active apps · ${formatMoney(totals?.planDaily ?? 0, currency)}/day at stake`}
-                emptyMessage="Every paid plan is hosting active apps."
-              >
-                {data.ghostTownPlans.map((plan) => (
-                  <LeakRow
-                    key={plan.id}
-                    name={plan.name}
-                    detail={`${plan.resourceGroup} · ${plan.sku} · ${plan.reason.toLowerCase()}`}
-                    stat={`${formatMoney(plan.estDailyCostUsd, currency)}/day`}
-                    subStat={`${plan.hostedAppCount} app${plan.hostedAppCount === 1 ? '' : 's'}, ${plan.hostedStoppedCount} stopped`}
-                  />
-                ))}
-              </LeakCard>
-
-              <LeakCard
-                icon={Globe}
-                iconClass="text-amber-400"
-                title="Zero-traffic App Services"
-                count={data.zeroTrafficApps.length}
-                description="Running apps that have not received a single HTTP request"
-                emptyMessage="Every running app is receiving traffic."
-              >
-                {data.zeroTrafficApps.map((app) => (
-                  <LeakRow
-                    key={app.id}
-                    name={app.name}
-                    detail={`${app.resourceGroup} · billed through its plan`}
-                    stat={`${app.totalRequests} requests`}
-                    statClass="text-red-400"
-                    subStat={`in ${app.windowDays} days`}
-                  />
-                ))}
-              </LeakCard>
-            </div>
-          )}
-        </section>
-
         {/* Database and out-of-hours */}
         <section className="space-y-3">
           <div>
@@ -480,6 +423,63 @@ export default function Dashboard() {
                   )}
                 </CardContent>
               </Card>
+            </div>
+          )}
+        </section>
+
+        {/* App Service drain */}
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-sm font-medium">App Service drain</h2>
+            <p className="text-xs text-muted-foreground">
+              Plans bill for the instance size whether or not any code is running
+            </p>
+          </div>
+          {!data ? (
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Skeleton className="h-56 rounded-xl" />
+              <Skeleton className="h-56 rounded-xl" />
+            </div>
+          ) : (
+            <div className="grid gap-4 lg:grid-cols-2">
+              <LeakCard
+                icon={Server}
+                iconClass="text-red-400"
+                title="Ghost town App Service Plans"
+                count={data.ghostTownPlans.length}
+                description={`Standard tier or above with no active apps · ${formatMoney(totals?.planDaily ?? 0, currency)}/day at stake`}
+                emptyMessage="Every paid plan is hosting active apps."
+              >
+                {data.ghostTownPlans.map((plan) => (
+                  <LeakRow
+                    key={plan.id}
+                    name={plan.name}
+                    detail={`${plan.resourceGroup} · ${plan.sku} · ${plan.reason.toLowerCase()}`}
+                    stat={`${formatMoney(plan.estDailyCostUsd, currency)}/day`}
+                    subStat={`${plan.hostedAppCount} app${plan.hostedAppCount === 1 ? '' : 's'}, ${plan.hostedStoppedCount} stopped`}
+                  />
+                ))}
+              </LeakCard>
+
+              <LeakCard
+                icon={Globe}
+                iconClass="text-amber-400"
+                title="Zero-traffic App Services"
+                count={data.zeroTrafficApps.length}
+                description="Running apps that have not received a single HTTP request"
+                emptyMessage="Every running app is receiving traffic."
+              >
+                {data.zeroTrafficApps.map((app) => (
+                  <LeakRow
+                    key={app.id}
+                    name={app.name}
+                    detail={`${app.resourceGroup} · billed through its plan`}
+                    stat={`${app.totalRequests} requests`}
+                    statClass="text-red-400"
+                    subStat={`in ${app.windowDays} days`}
+                  />
+                ))}
+              </LeakCard>
             </div>
           )}
         </section>
