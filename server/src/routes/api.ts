@@ -5,7 +5,17 @@ import { canHibernate, estimateHibernatedDailyCost, resolveDailyCost, round2 } f
 import { protection, riskLevel, scoreResource } from '../services/scoring';
 import { syncFromProvider } from '../services/sync';
 import * as repo from '../db/resourcesRepo';
-import { ResourceGroupSummary, RiskLevel, ScoredResource, StoredResource, Summary } from '../types';
+import {
+  CosmosFlag,
+  DashboardData,
+  GhostTownPlan,
+  OutOfHoursBreakdown,
+  ResourceGroupSummary,
+  RiskLevel,
+  ScoredResource,
+  StoredResource,
+  Summary,
+} from '../types';
 
 export const apiRouter = Router();
 
@@ -70,12 +80,120 @@ function buildSummary(): Summary {
   };
 }
 
+/** Share of a weekday assumed to fall out of hours (19:00 to 07:00 is 12 of 24 hours). */
+const WEEKDAY_OUT_OF_HOURS_SHARE = 0.5;
+
+function buildDashboard(): DashboardData {
+  const summary = buildSummary();
+  const resources = getScoredResources();
+  const byId = new Map(resources.map((r) => [r.id.toLowerCase(), r]));
+  const insights = repo.getInsights();
+
+  // Enrich metric findings with the stored resource's cost and display fields.
+  const ghostVms = (insights?.ghostVms ?? []).map((g) => {
+    const stored = byId.get(g.id.toLowerCase());
+    return {
+      ...g,
+      name: stored?.name ?? g.name,
+      resourceGroup: stored?.resourceGroup ?? g.resourceGroup,
+      sku: stored?.sku || g.sku,
+      estDailyCostUsd: round2(stored?.estDailyCostUsd ?? 0),
+    };
+  });
+
+  const ghostTownPlans: GhostTownPlan[] = resources
+    .filter((r) => r.kind === 'appServicePlan' && /^[SP]/i.test(r.sku))
+    .flatMap((r) => {
+      const total = r.hostedAppCount ?? 0;
+      const stopped = r.hostedStoppedCount ?? 0;
+      let reason: string | null = null;
+      if (total === 0) reason = 'Standard tier or above hosting zero apps';
+      else if (stopped === total) reason = 'Every hosted app is stopped';
+      if (!reason) return [];
+      return [
+        {
+          id: r.id,
+          name: r.name,
+          resourceGroup: r.resourceGroup,
+          sku: r.sku,
+          hostedAppCount: total,
+          hostedStoppedCount: stopped,
+          estDailyCostUsd: r.estDailyCostUsd,
+          reason,
+        },
+      ];
+    })
+    .sort((a, b) => b.estDailyCostUsd - a.estDailyCostUsd);
+
+  const cosmosFlags: CosmosFlag[] = resources
+    .filter(
+      (r) =>
+        r.kind === 'cosmos' &&
+        !r.isProtected &&
+        (r.provisionedRUs ?? 0) >= 400 &&
+        r.throughputMode !== 'autoscale' &&
+        r.throughputMode !== 'serverless'
+    )
+    .map((r) => ({
+      id: r.id,
+      name: r.name,
+      resourceGroup: r.resourceGroup,
+      provisionedRUs: r.provisionedRUs ?? 0,
+      estDailyCostUsd: r.estDailyCostUsd,
+      reason: `${r.provisionedRUs} RU/s of fixed manual throughput; consider autoscale or serverless`,
+    }))
+    .sort((a, b) => b.estDailyCostUsd - a.estDailyCostUsd);
+
+  let outOfHours: OutOfHoursBreakdown | null = null;
+  const dailyCosts = insights?.dailyCosts ?? [];
+  if (dailyCosts.length > 0) {
+    const weekendCostUsd = dailyCosts.filter((d) => d.isWeekend).reduce((sum, d) => sum + d.costUsd, 0);
+    const weekdayCostUsd = dailyCosts.filter((d) => !d.isWeekend).reduce((sum, d) => sum + d.costUsd, 0);
+    const total = weekendCostUsd + weekdayCostUsd;
+    const outOfHoursCostUsd = weekendCostUsd + weekdayCostUsd * WEEKDAY_OUT_OF_HOURS_SHARE;
+    outOfHours = {
+      dailyCosts,
+      weekdayCostUsd: round2(weekdayCostUsd),
+      weekendCostUsd: round2(weekendCostUsd),
+      outOfHoursCostUsd: round2(outOfHoursCostUsd),
+      outOfHoursSharePct: total > 0 ? Math.round((outOfHoursCostUsd / total) * 100) : 0,
+      windowDays: dailyCosts.length,
+    };
+  }
+
+  return {
+    hero: {
+      subscriptionName: summary.subscriptionName,
+      mockMode: summary.mockMode,
+      estimatesOnly: summary.estimatesOnly,
+      potentialMonthlySavingsUsd: summary.potentialMonthlySavingsUsd,
+      zombieCount: summary.idleResourceCount,
+      dailyBurnRateUsd: summary.dailyBurnRateUsd,
+      monthlyWasteEstimateUsd: summary.monthlyWasteEstimateUsd,
+    },
+    ghostVms,
+    orphanedDisks: insights?.orphanedDisks ?? [],
+    ghostTownPlans,
+    zeroTrafficApps: insights?.zeroTrafficApps ?? [],
+    cosmosFlags,
+    outOfHours,
+    insightsCapturedAt: insights?.capturedAt ?? null,
+  };
+}
+
 const RISK_ORDER: Record<RiskLevel, number> = { healthy: 0, warning: 1, critical: 2 };
 
 apiRouter.get(
   '/summary',
   wrap(async (_req, res) => {
     res.json(buildSummary());
+  })
+);
+
+apiRouter.get(
+  '/dashboard',
+  wrap(async (_req, res) => {
+    res.json(buildDashboard());
   })
 );
 

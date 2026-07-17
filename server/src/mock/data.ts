@@ -1,4 +1,11 @@
-import { ActivityEntry, JanitorResource, ResourceKind } from '../types';
+import {
+  ActivityEntry,
+  DailyCostPoint,
+  JanitorResource,
+  OrphanedDisk,
+  ProviderInsights,
+  ResourceKind,
+} from '../types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SUB = '00000000-0000-0000-0000-000000000000';
@@ -65,6 +72,7 @@ export function seedResources(): JanitorResource[] {
     }),
     mk('rg-data-platform-poc', 'Microsoft.DocumentDB/databaseAccounts', 'cosmos-poc-orders', 'cosmos', '4000 RU/s', 'online', 70, { env: 'poc' }, {
       provisionedRUs: 4000,
+      throughputMode: 'manual',
       idleSignals: ['Provisioned at 4000 RU/s with no recent data-plane operations'],
     }),
     mk('rg-data-platform-poc', 'Microsoft.Sql/servers/databases', 'sqldb-tmp-migration', 'sql', 'GP_S_Gen5_2', 'online', 55, {}, {
@@ -76,27 +84,102 @@ export function seedResources(): JanitorResource[] {
       idleSignals: ['Large VM running since the last load test three weeks ago'],
     }),
     mk('rg-web-uat', 'Microsoft.Web/serverfarms', 'plan-demo-portal', 'appServicePlan', 'P1v3', 'running', 51, { env: 'demo' }, {
-      hostedAppCount: 1,
+      hostedAppCount: 2,
       hostedStoppedCount: 1,
-      idleSignals: ['All hosted apps are stopped'],
+      idleSignals: ['Hosts one stopped app and one app receiving no traffic'],
     }),
     mk('rg-web-uat', 'Microsoft.Web/sites', 'app-demo-portal', 'appService', 'via plan-demo-portal', 'stopped', 51, { env: 'demo' }, {
       idleSignals: ['App is stopped'],
     }),
+    mk('rg-web-uat', 'Microsoft.Web/sites', 'app-uat-notify', 'appService', 'via plan-demo-portal', 'running', 40, { env: 'uat' }, {
+      idleSignals: ['No HTTP requests in the last 3 days'],
+    }),
     mk('rg-web-uat', 'Microsoft.DocumentDB/databaseAccounts', 'cosmos-uat-catalog', 'cosmos', '1000 RU/s', 'online', 12, { env: 'uat', owner: 'web-team' }, {
       provisionedRUs: 1000,
+      throughputMode: 'autoscale',
     }),
     mk('rg-web-uat', 'Microsoft.Storage/storageAccounts', 'stwebassets', 'storage', 'Standard_GRS', 'available', 2, { env: 'uat', owner: 'web-team' }),
     // rg-core-prod (safety rails demo: everything here must refuse actions)
     mk('rg-core-prod', 'Microsoft.Compute/virtualMachines', 'vm-prod-gateway', 'vm', 'Standard_D4s_v3', 'running', 0, { env: 'prod', owner: 'platform-team' }),
     mk('rg-core-prod', 'Microsoft.DocumentDB/databaseAccounts', 'cosmos-core-ledger', 'cosmos', '10000 RU/s', 'online', 1, { owner: 'platform-team', protected: 'true' }, {
       provisionedRUs: 10000,
+      throughputMode: 'manual',
     }),
     mk('rg-core-prod', 'Microsoft.Web/serverfarms', 'plan-core-api', 'appServicePlan', 'P1v3', 'running', 1, { owner: 'platform-team' }, {
       hostedAppCount: 3,
       hostedStoppedCount: 0,
     }),
   ];
+}
+
+/** Synthetic 24-hour average CPU per running dev VM; prod VMs are deliberately absent. */
+const GHOST_CPU_BY_NAME: Record<string, number> = {
+  'vm-build-agent-01': 0.8,
+  'vm-jm-sandbox': 1.3,
+  'vm-poc-ml-train': 0.4,
+  'vm-loadtest-uat': 1.7,
+};
+
+function mkDisk(rg: string, name: string, sku: string, sizeGb: number, usdPerGbMonth: number): OrphanedDisk {
+  return {
+    id: `/subscriptions/${SUB}/resourceGroups/${rg}/providers/Microsoft.Compute/disks/${name}`,
+    name,
+    resourceGroup: rg,
+    sku,
+    sizeGb,
+    estMonthlyCostUsd: Math.round(sizeGb * usdPerGbMonth * 100) / 100,
+  };
+}
+
+/** Deterministic 30-day daily cost series with a visible weekday/weekend rhythm. */
+function seedDailyCosts(): DailyCostPoint[] {
+  const out: DailyCostPoint[] = [];
+  for (let i = 29; i >= 0; i -= 1) {
+    const d = new Date(Date.now() - i * DAY_MS);
+    const date = d.toISOString().slice(0, 10);
+    const day = d.getUTCDay();
+    const isWeekend = day === 0 || day === 6;
+    const base = isWeekend ? 74 : 96;
+    const wobble = Math.sin(i * 1.7) * 7;
+    out.push({ date, costUsd: Math.round((base + wobble) * 100) / 100, isWeekend });
+  }
+  return out;
+}
+
+/** Synthetic dashboard insights derived from the current mock resource set. */
+export function seedInsights(resources: JanitorResource[]): ProviderInsights {
+  const ghostVms = resources
+    .filter((r) => r.kind === 'vm' && r.state === 'running' && r.name in GHOST_CPU_BY_NAME)
+    .map((r) => ({
+      id: r.id,
+      name: r.name,
+      resourceGroup: r.resourceGroup,
+      sku: r.sku,
+      avgCpuPercent: GHOST_CPU_BY_NAME[r.name],
+      windowHours: 24,
+    }));
+  const zeroTrafficApps = resources
+    .filter((r) => r.kind === 'appService' && r.state === 'running')
+    .map((r) => ({
+      id: r.id,
+      name: r.name,
+      resourceGroup: r.resourceGroup,
+      state: r.state,
+      totalRequests: 0,
+      windowDays: 3,
+    }));
+  const orphanedDisks = [
+    mkDisk('rg-payments-dev', 'md-vm-deleted-data', 'StandardSSD_LRS', 512, 0.075),
+    mkDisk('rg-data-platform-poc', 'disk-old-jenkins-os', 'Premium_LRS', 128, 0.132),
+    mkDisk('rg-data-platform-poc', 'disk-ml-scratch', 'Standard_LRS', 1024, 0.045),
+  ].sort((a, b) => b.estMonthlyCostUsd - a.estMonthlyCostUsd);
+  return {
+    ghostVms,
+    orphanedDisks,
+    zeroTrafficApps,
+    dailyCosts: seedDailyCosts(),
+    capturedAt: new Date().toISOString(),
+  };
 }
 
 const OPS_BY_KIND: Record<string, string[]> = {

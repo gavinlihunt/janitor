@@ -1,7 +1,7 @@
 import { IAzureProvider } from '../azure/provider';
 import { HttpError } from '../services/actions';
-import { ActivityEntry, JanitorResource } from '../types';
-import { mockActivityFor, seedResources } from './data';
+import { ActivityEntry, JanitorResource, ProviderInsights } from '../types';
+import { mockActivityFor, seedInsights, seedResources } from './data';
 import priceMap from '../services/priceMap.json';
 
 /** In-memory provider. Fully demoable, never touches Azure. */
@@ -19,6 +19,10 @@ export class MockAzureProvider implements IAzureProvider {
 
   async getActivityLog(resourceId: string): Promise<ActivityEntry[]> {
     return mockActivityFor(this.require(resourceId));
+  }
+
+  async getDashboardInsights(): Promise<ProviderInsights> {
+    return seedInsights(this.resources);
   }
 
   async hibernate(resourceId: string): Promise<JanitorResource> {

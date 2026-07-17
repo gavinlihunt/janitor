@@ -7,11 +7,49 @@ import { CosmosDBManagementClient } from '@azure/arm-cosmosdb';
 import { CostManagementClient } from '@azure/arm-costmanagement';
 import { IAzureProvider } from './provider';
 import { HttpError } from '../services/actions';
-import { ActivityEntry, JanitorResource, ResourceKind } from '../types';
+import {
+  ActivityEntry,
+  DailyCostPoint,
+  GhostVm,
+  JanitorResource,
+  OrphanedDisk,
+  ProviderInsights,
+  ResourceKind,
+  ZeroTrafficApp,
+} from '../types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ACTIVITY_WINDOW_DAYS = 90;
 const MAX_ACTIVITY_EVENTS = 2000;
+/** Running VMs averaging below this CPU percentage over 24 hours count as ghosts. */
+const GHOST_CPU_THRESHOLD = 2;
+const GHOST_CPU_WINDOW_HOURS = 24;
+/** Window for the zero-traffic Requests check. */
+const ZERO_TRAFFIC_WINDOW_DAYS = 3;
+const COST_SERIES_WINDOW_DAYS = 30;
+
+/**
+ * Rough estimated storage price per GB-month by managed disk SKU prefix.
+ * Deliberately approximate, in line with the price-map approach elsewhere.
+ */
+const DISK_USD_PER_GB_MONTH: Record<string, number> = {
+  UltraSSD: 0.3,
+  PremiumV2: 0.095,
+  Premium: 0.132,
+  StandardSSD: 0.075,
+  Standard: 0.045,
+};
+
+function estimateDiskMonthlyCost(skuName: string, sizeGb: number): number {
+  const prefix = Object.keys(DISK_USD_PER_GB_MONTH).find((p) => skuName.startsWith(p));
+  const rate = prefix ? DISK_USD_PER_GB_MONTH[prefix] : DISK_USD_PER_GB_MONTH.Standard;
+  return Math.round(sizeGb * rate * 100) / 100;
+}
+
+function isWeekendDate(isoDate: string): boolean {
+  const day = new Date(`${isoDate}T00:00:00Z`).getUTCDay();
+  return day === 0 || day === 6;
+}
 
 // Child/noise resource types that would clutter the dashboard.
 const EXCLUDED_TYPES = new Set([
@@ -87,11 +125,12 @@ export class LiveAzureProvider implements IAzureProvider {
   }
 
   async listResources(): Promise<JanitorResource[]> {
-    const [generic, activityIndex, vmDetails, webDetails] = await Promise.all([
+    const [generic, activityIndex, vmDetails, webDetails, cosmosDetails] = await Promise.all([
       this.listGenericResources(),
       this.buildActivityIndex(),
       this.getVmDetails(),
       this.getWebDetails(),
+      this.getCosmosDetails(),
     ]);
 
     return generic
@@ -150,9 +189,18 @@ export class LiveAzureProvider implements IAzureProvider {
             }
             break;
           }
-          case 'cosmos':
+          case 'cosmos': {
             base.state = 'online';
+            const d = cosmosDetails.get(idLower);
+            if (d) {
+              base.throughputMode = d.mode;
+              if (d.rus > 0) {
+                base.provisionedRUs = d.rus;
+                base.sku = `${d.rus} RU/s`;
+              }
+            }
             break;
+          }
           default:
             break;
         }
@@ -302,6 +350,259 @@ export class LiveAzureProvider implements IAzureProvider {
       daily.set(rid, (daily.get(rid) ?? 0) + total / windowDays);
     }
     return daily;
+  }
+
+  /**
+   * Metric-based dashboard findings. Each section is best effort: a failure in
+   * one lookup yields an empty section rather than failing the whole capture.
+   */
+  async getDashboardInsights(): Promise<ProviderInsights> {
+    const [ghostVms, orphanedDisks, zeroTrafficApps, dailyCosts] = await Promise.all([
+      this.findGhostVms(),
+      this.findOrphanedDisks(),
+      this.findZeroTrafficApps(),
+      this.getDailyCostSeries(),
+    ]);
+    return { ghostVms, orphanedDisks, zeroTrafficApps, dailyCosts, capturedAt: new Date().toISOString() };
+  }
+
+  /** Average of a platform metric over the trailing window, or null when unavailable. */
+  private async metricAverage(resourceId: string, metricName: string, hours: number): Promise<number | null> {
+    try {
+      const to = new Date();
+      const from = new Date(to.getTime() - hours * 60 * 60 * 1000);
+      const result = await this.monitor.metrics.list(resourceId, {
+        timespan: `${from.toISOString()}/${to.toISOString()}`,
+        interval: 'PT1H',
+        metricnames: metricName,
+        aggregation: 'Average',
+      });
+      const points = result.value?.[0]?.timeseries?.[0]?.data ?? [];
+      const values = points
+        .map((p) => p.average)
+        .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+      if (values.length === 0) return null;
+      return values.reduce((sum, v) => sum + v, 0) / values.length;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Sum of a platform metric's Total aggregation over the trailing window, or null. */
+  private async metricTotal(resourceId: string, metricName: string, hours: number): Promise<number | null> {
+    try {
+      const to = new Date();
+      const from = new Date(to.getTime() - hours * 60 * 60 * 1000);
+      const result = await this.monitor.metrics.list(resourceId, {
+        timespan: `${from.toISOString()}/${to.toISOString()}`,
+        interval: 'PT1H',
+        metricnames: metricName,
+        aggregation: 'Total',
+      });
+      const points = result.value?.[0]?.timeseries?.[0]?.data ?? [];
+      let saw = false;
+      let sum = 0;
+      for (const p of points) {
+        if (typeof p.total === 'number' && Number.isFinite(p.total)) {
+          saw = true;
+          sum += p.total;
+        }
+      }
+      return saw ? sum : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Running VMs whose average CPU sat under the ghost threshold for the window. */
+  private async findGhostVms(): Promise<GhostVm[]> {
+    try {
+      const vmDetails = await this.getVmDetails();
+      const running = [...vmDetails.entries()].filter(([, d]) => d.powerState === 'running');
+      const checks = await Promise.all(
+        running.map(async ([idLower, d]) => {
+          const avg = await this.metricAverage(idLower, 'Percentage CPU', GHOST_CPU_WINDOW_HOURS);
+          if (avg === null || avg >= GHOST_CPU_THRESHOLD) return null;
+          const { resourceGroup, name } = parseResourceId(idLower);
+          const ghost: GhostVm = {
+            id: idLower,
+            name,
+            resourceGroup,
+            sku: d.size,
+            avgCpuPercent: Math.round(avg * 100) / 100,
+            windowHours: GHOST_CPU_WINDOW_HOURS,
+          };
+          return ghost;
+        })
+      );
+      return checks.filter((g): g is GhostVm => g !== null);
+    } catch (err) {
+      console.warn('[azure-janitor] ghost VM detection failed:', err);
+      return [];
+    }
+  }
+
+  /** Managed disks whose managedBy is empty: unattached but still billed. */
+  private async findOrphanedDisks(): Promise<OrphanedDisk[]> {
+    const out: OrphanedDisk[] = [];
+    try {
+      for await (const disk of this.compute.disks.list()) {
+        const d = disk as Record<string, any>;
+        if (d.managedBy) continue;
+        const id = String(d.id ?? '');
+        const sku = String(d.sku?.name ?? 'Standard_LRS');
+        const sizeGb = Number(d.diskSizeGB ?? 0);
+        out.push({
+          id,
+          name: String(d.name ?? ''),
+          resourceGroup: rgFromId(id),
+          sku,
+          sizeGb,
+          estMonthlyCostUsd: estimateDiskMonthlyCost(sku, sizeGb),
+        });
+      }
+    } catch (err) {
+      console.warn('[azure-janitor] orphaned disk scan failed:', err);
+    }
+    return out.sort((a, b) => b.estMonthlyCostUsd - a.estMonthlyCostUsd);
+  }
+
+  /** Running web apps with zero Requests over the window. */
+  private async findZeroTrafficApps(): Promise<ZeroTrafficApp[]> {
+    try {
+      const apps: Array<{ id: string; name: string; state: string }> = [];
+      for await (const site of this.web.webApps.list()) {
+        const s = site as Record<string, any>;
+        const state = String(s.state ?? 'unknown').toLowerCase();
+        if (state !== 'running') continue;
+        apps.push({ id: String(s.id ?? ''), name: String(s.name ?? ''), state });
+      }
+      const checks = await Promise.all(
+        apps.map(async (app) => {
+          const total = await this.metricTotal(app.id, 'Requests', ZERO_TRAFFIC_WINDOW_DAYS * 24);
+          if (total === null || total > 0) return null;
+          const flagged: ZeroTrafficApp = {
+            id: app.id,
+            name: app.name,
+            resourceGroup: rgFromId(app.id),
+            state: app.state,
+            totalRequests: 0,
+            windowDays: ZERO_TRAFFIC_WINDOW_DAYS,
+          };
+          return flagged;
+        })
+      );
+      return checks.filter((a): a is ZeroTrafficApp => a !== null);
+    } catch (err) {
+      console.warn('[azure-janitor] zero-traffic app scan failed:', err);
+      return [];
+    }
+  }
+
+  /** Daily subscription cost over the trailing window via the Cost Management query API. */
+  private async getDailyCostSeries(): Promise<DailyCostPoint[]> {
+    try {
+      const client = new CostManagementClient(this.credential);
+      const scope = `/subscriptions/${this.subscriptionId}`;
+      const to = new Date();
+      const from = new Date(to.getTime() - COST_SERIES_WINDOW_DAYS * DAY_MS);
+      const result = await client.query.usage(scope, {
+        type: 'ActualCost',
+        timeframe: 'Custom',
+        timePeriod: { from, to },
+        dataset: {
+          granularity: 'Daily',
+          aggregation: { totalCost: { name: 'CostUSD', function: 'Sum' } },
+        },
+      });
+      if (!result) return [];
+      const columns = (result.columns ?? []).map((c) => String(c.name ?? ''));
+      const dateIdx = columns.findIndex((n) => /^usagedate$/i.test(n));
+      const costIdx = columns.findIndex((n) => /^costusd$/i.test(n));
+      const fallbackCostIdx = columns.findIndex((n) => /^(cost|pretaxcost)$/i.test(n));
+      const useCostIdx = costIdx >= 0 ? costIdx : fallbackCostIdx;
+      if (dateIdx < 0 || useCostIdx < 0) return [];
+
+      const byDate = new Map<string, number>();
+      for (const row of result.rows ?? []) {
+        // UsageDate arrives as a yyyymmdd number.
+        const raw = String(row[dateIdx] ?? '');
+        if (!/^\d{8}$/.test(raw)) continue;
+        const date = `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+        const cost = Number(row[useCostIdx] ?? 0);
+        if (!Number.isFinite(cost)) continue;
+        byDate.set(date, (byDate.get(date) ?? 0) + cost);
+      }
+      return [...byDate.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, costUsd]) => ({
+          date,
+          costUsd: Math.round(costUsd * 100) / 100,
+          isWeekend: isWeekendDate(date),
+        }));
+    } catch (err) {
+      console.warn('[azure-janitor] daily cost series unavailable:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Best effort Cosmos throughput details keyed by lower-cased account id:
+   * summed RU/s across SQL databases plus how throughput is billed.
+   */
+  private async getCosmosDetails(): Promise<
+    Map<string, { rus: number; mode: 'manual' | 'autoscale' | 'serverless' }>
+  > {
+    const map = new Map<string, { rus: number; mode: 'manual' | 'autoscale' | 'serverless' }>();
+    try {
+      const accounts: Array<Record<string, any>> = [];
+      for await (const account of this.cosmos.databaseAccounts.list()) {
+        accounts.push(account as Record<string, any>);
+      }
+      await Promise.all(
+        accounts.map(async (account) => {
+          const id = String(account.id ?? '').toLowerCase();
+          const capabilities = (account.capabilities ?? []) as Array<{ name?: string }>;
+          if (capabilities.some((c) => c.name === 'EnableServerless')) {
+            map.set(id, { rus: 0, mode: 'serverless' });
+            return;
+          }
+          try {
+            const { resourceGroup, name } = parseResourceId(id);
+            let rus = 0;
+            let sawManual = false;
+            let sawAutoscale = false;
+            for await (const database of this.cosmos.sqlResources.listSqlDatabases(resourceGroup, name)) {
+              try {
+                const throughput = (await this.cosmos.sqlResources.getSqlDatabaseThroughput(
+                  resourceGroup,
+                  name,
+                  String(database.name ?? '')
+                )) as Record<string, any>;
+                const resource = throughput?.resource ?? {};
+                if (resource.autoscaleSettings?.maxThroughput) {
+                  sawAutoscale = true;
+                  rus += Number(resource.autoscaleSettings.maxThroughput);
+                } else if (resource.throughput) {
+                  sawManual = true;
+                  rus += Number(resource.throughput);
+                }
+              } catch {
+                // Database-level throughput not set (container-level or shared); skip.
+              }
+            }
+            if (sawManual || sawAutoscale) {
+              map.set(id, { rus, mode: sawManual ? 'manual' : 'autoscale' });
+            }
+          } catch (err) {
+            console.warn('[azure-janitor] cosmos throughput lookup failed:', err);
+          }
+        })
+      );
+    } catch (err) {
+      console.warn('[azure-janitor] could not enrich Cosmos accounts:', err);
+    }
+    return map;
   }
 
   private async listGenericResources(): Promise<Array<Record<string, any>>> {

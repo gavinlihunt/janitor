@@ -42,4 +42,18 @@ db.exec(`
     estimates_only INTEGER NOT NULL DEFAULT 1,
     last_synced_at TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS insights (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    json TEXT NOT NULL,
+    captured_at TEXT NOT NULL
+  );
 `);
+
+// Lightweight migration for databases created before the column existed.
+const resourceColumns = (db.prepare("PRAGMA table_info('resources')").all() as Array<{ name: string }>).map(
+  (c) => c.name
+);
+if (!resourceColumns.includes('throughput_mode')) {
+  db.exec('ALTER TABLE resources ADD COLUMN throughput_mode TEXT');
+}

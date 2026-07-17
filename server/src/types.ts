@@ -31,6 +31,8 @@ export interface JanitorResource {
   hostedStoppedCount?: number;
   /** Cosmos DB only: provisioned RU/s. */
   provisionedRUs?: number;
+  /** Cosmos DB only: how throughput is billed. */
+  throughputMode?: 'manual' | 'autoscale' | 'serverless';
   /** Hours per day the resource is billed as running (24 unless deallocated). */
   hoursRunningPerDay: number;
 }
@@ -82,6 +84,103 @@ export interface ResourceGroupSummary {
   resourceCount: number;
   estDailyCostUsd: number;
   worstRisk: RiskLevel;
+}
+
+/** Running VM whose average CPU stayed below the ghost threshold over the window. */
+export interface GhostVm {
+  id: string;
+  name: string;
+  resourceGroup: string;
+  sku: string;
+  avgCpuPercent: number;
+  windowHours: number;
+}
+
+/** Managed disk that is not attached to any VM but is still billed. */
+export interface OrphanedDisk {
+  id: string;
+  name: string;
+  resourceGroup: string;
+  sku: string;
+  sizeGb: number;
+  estMonthlyCostUsd: number;
+}
+
+/** Running app that received no HTTP requests over the window. */
+export interface ZeroTrafficApp {
+  id: string;
+  name: string;
+  resourceGroup: string;
+  state: string;
+  totalRequests: number;
+  windowDays: number;
+}
+
+export interface DailyCostPoint {
+  /** ISO date, yyyy-mm-dd. */
+  date: string;
+  costUsd: number;
+  isWeekend: boolean;
+}
+
+/** Metric-based findings captured from the provider at sync time. */
+export interface ProviderInsights {
+  ghostVms: GhostVm[];
+  orphanedDisks: OrphanedDisk[];
+  zeroTrafficApps: ZeroTrafficApp[];
+  dailyCosts: DailyCostPoint[];
+  capturedAt: string;
+}
+
+/** Standard-or-above App Service Plan with no active apps. */
+export interface GhostTownPlan {
+  id: string;
+  name: string;
+  resourceGroup: string;
+  sku: string;
+  hostedAppCount: number;
+  hostedStoppedCount: number;
+  estDailyCostUsd: number;
+  reason: string;
+}
+
+/** Cosmos DB account on fixed manual throughput in a non-production group. */
+export interface CosmosFlag {
+  id: string;
+  name: string;
+  resourceGroup: string;
+  provisionedRUs: number;
+  estDailyCostUsd: number;
+  reason: string;
+}
+
+export interface OutOfHoursBreakdown {
+  dailyCosts: DailyCostPoint[];
+  weekdayCostUsd: number;
+  weekendCostUsd: number;
+  /** Weekend spend plus the estimated overnight share of weekday spend. */
+  outOfHoursCostUsd: number;
+  outOfHoursSharePct: number;
+  windowDays: number;
+}
+
+export interface DashboardData {
+  hero: {
+    subscriptionName: string;
+    mockMode: boolean;
+    estimatesOnly: boolean;
+    potentialMonthlySavingsUsd: number;
+    zombieCount: number;
+    dailyBurnRateUsd: number;
+    monthlyWasteEstimateUsd: number;
+  };
+  ghostVms: Array<GhostVm & { estDailyCostUsd: number }>;
+  orphanedDisks: OrphanedDisk[];
+  ghostTownPlans: GhostTownPlan[];
+  zeroTrafficApps: ZeroTrafficApp[];
+  cosmosFlags: CosmosFlag[];
+  outOfHours: OutOfHoursBreakdown | null;
+  insightsCapturedAt: string | null;
 }
 
 export interface Summary {

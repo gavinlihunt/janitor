@@ -1,6 +1,6 @@
 import { getProvider } from '../azure/provider';
 import { resolveDailyCost } from './burnRate';
-import { ResourceUpsert, replaceResources, setSyncMeta, SyncMeta } from '../db/resourcesRepo';
+import { ResourceUpsert, replaceResources, setInsights, setSyncMeta, SyncMeta } from '../db/resourcesRepo';
 
 export interface SyncResult {
   count: number;
@@ -30,6 +30,16 @@ export async function syncFromProvider(): Promise<SyncResult> {
     }
   }
   const estimatesOnly = usage === null;
+
+  // Metric-based dashboard findings are best effort: a failure keeps the
+  // previous capture rather than blocking the sync.
+  if (provider.getDashboardInsights) {
+    try {
+      setInsights(await provider.getDashboardInsights());
+    } catch (err) {
+      console.warn('[azure-janitor] dashboard insights unavailable:', err);
+    }
+  }
 
   const syncedAt = new Date().toISOString();
   const rows: ResourceUpsert[] = resources.map((r) => ({

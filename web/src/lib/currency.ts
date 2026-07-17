@@ -67,3 +67,14 @@ export function useCurrency(): Currency {
 export function formatMoney(usd: number, currency: Currency = current): string {
   return formatters[currency].format(usd * USD_RATES[currency]);
 }
+
+const wholeFormatters: Record<Currency, Intl.NumberFormat> = {
+  USD: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }),
+  GBP: new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }),
+  ZAR: new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR', maximumFractionDigits: 0 }),
+};
+
+/** As formatMoney, but rounded to whole units for large display figures. */
+export function formatMoneyWhole(usd: number, currency: Currency = current): string {
+  return wholeFormatters[currency].format(usd * USD_RATES[currency]);
+}

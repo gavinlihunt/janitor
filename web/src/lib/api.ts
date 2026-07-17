@@ -67,6 +67,88 @@ export interface Summary {
   potentialMonthlySavingsUsd: number;
 }
 
+export interface GhostVm {
+  id: string;
+  name: string;
+  resourceGroup: string;
+  sku: string;
+  avgCpuPercent: number;
+  windowHours: number;
+  estDailyCostUsd: number;
+}
+
+export interface OrphanedDisk {
+  id: string;
+  name: string;
+  resourceGroup: string;
+  sku: string;
+  sizeGb: number;
+  estMonthlyCostUsd: number;
+}
+
+export interface ZeroTrafficApp {
+  id: string;
+  name: string;
+  resourceGroup: string;
+  state: string;
+  totalRequests: number;
+  windowDays: number;
+}
+
+export interface GhostTownPlan {
+  id: string;
+  name: string;
+  resourceGroup: string;
+  sku: string;
+  hostedAppCount: number;
+  hostedStoppedCount: number;
+  estDailyCostUsd: number;
+  reason: string;
+}
+
+export interface CosmosFlag {
+  id: string;
+  name: string;
+  resourceGroup: string;
+  provisionedRUs: number;
+  estDailyCostUsd: number;
+  reason: string;
+}
+
+export interface DailyCostPoint {
+  date: string;
+  costUsd: number;
+  isWeekend: boolean;
+}
+
+export interface OutOfHoursBreakdown {
+  dailyCosts: DailyCostPoint[];
+  weekdayCostUsd: number;
+  weekendCostUsd: number;
+  outOfHoursCostUsd: number;
+  outOfHoursSharePct: number;
+  windowDays: number;
+}
+
+export interface DashboardData {
+  hero: {
+    subscriptionName: string;
+    mockMode: boolean;
+    estimatesOnly: boolean;
+    potentialMonthlySavingsUsd: number;
+    zombieCount: number;
+    dailyBurnRateUsd: number;
+    monthlyWasteEstimateUsd: number;
+  };
+  ghostVms: GhostVm[];
+  orphanedDisks: OrphanedDisk[];
+  ghostTownPlans: GhostTownPlan[];
+  zeroTrafficApps: ZeroTrafficApp[];
+  cosmosFlags: CosmosFlag[];
+  outOfHours: OutOfHoursBreakdown | null;
+  insightsCapturedAt: string | null;
+}
+
 export interface ActivityEntry {
   timestamp: string;
   operationName: string;
@@ -92,6 +174,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   summary: () => request<Summary>('/summary'),
+  dashboard: () => request<DashboardData>('/dashboard'),
   resourceGroups: () => request<ResourceGroupSummary[]>('/resource-groups'),
   resources: (opts: { sort?: 'cost' | 'score'; rg?: string | null } = {}) => {
     const params = new URLSearchParams();

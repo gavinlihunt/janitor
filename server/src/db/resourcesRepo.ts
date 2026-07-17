@@ -1,5 +1,5 @@
 import { db } from './database';
-import { JanitorResource, ResourceKind, StoredResource } from '../types';
+import { JanitorResource, ProviderInsights, ResourceKind, StoredResource } from '../types';
 
 /** A resource ready to persist: raw Azure fields plus the cost resolved at sync time. */
 export type ResourceUpsert = JanitorResource & { estDailyCostUsd: number };
@@ -26,6 +26,7 @@ interface ResourceRow {
   hosted_app_count: number | null;
   hosted_stopped_count: number | null;
   provisioned_rus: number | null;
+  throughput_mode: string | null;
   hours_running_per_day: number;
   est_daily_cost_usd: number;
   in_use: number;
@@ -54,6 +55,9 @@ function rowToStored(row: ResourceRow): StoredResource {
   if (row.hosted_app_count !== null) stored.hostedAppCount = row.hosted_app_count;
   if (row.hosted_stopped_count !== null) stored.hostedStoppedCount = row.hosted_stopped_count;
   if (row.provisioned_rus !== null) stored.provisionedRUs = row.provisioned_rus;
+  if (row.throughput_mode !== null) {
+    stored.throughputMode = row.throughput_mode as StoredResource['throughputMode'];
+  }
   return stored;
 }
 
@@ -74,6 +78,7 @@ function toBind(r: ResourceUpsert, syncedAt: string): Record<string, string | nu
     hosted_app_count: r.hostedAppCount ?? null,
     hosted_stopped_count: r.hostedStoppedCount ?? null,
     provisioned_rus: r.provisionedRUs ?? null,
+    throughput_mode: r.throughputMode ?? null,
     hours_running_per_day: r.hoursRunningPerDay,
     est_daily_cost_usd: r.estDailyCostUsd,
     last_synced_at: syncedAt,
@@ -87,11 +92,11 @@ const upsertStmt = db.prepare(`
   INSERT INTO resources (
     id, name, kind, azure_type, resource_group, location, sku, tags, state,
     last_activity, idle_signals, hosted_app_count, hosted_stopped_count,
-    provisioned_rus, hours_running_per_day, est_daily_cost_usd, last_synced_at
+    provisioned_rus, throughput_mode, hours_running_per_day, est_daily_cost_usd, last_synced_at
   ) VALUES (
     @id, @name, @kind, @azure_type, @resource_group, @location, @sku, @tags, @state,
     @last_activity, @idle_signals, @hosted_app_count, @hosted_stopped_count,
-    @provisioned_rus, @hours_running_per_day, @est_daily_cost_usd, @last_synced_at
+    @provisioned_rus, @throughput_mode, @hours_running_per_day, @est_daily_cost_usd, @last_synced_at
   )
   ON CONFLICT(id) DO UPDATE SET
     name = excluded.name,
@@ -107,6 +112,7 @@ const upsertStmt = db.prepare(`
     hosted_app_count = excluded.hosted_app_count,
     hosted_stopped_count = excluded.hosted_stopped_count,
     provisioned_rus = excluded.provisioned_rus,
+    throughput_mode = excluded.throughput_mode,
     hours_running_per_day = excluded.hours_running_per_day,
     est_daily_cost_usd = excluded.est_daily_cost_usd,
     last_synced_at = excluded.last_synced_at
@@ -189,4 +195,26 @@ export function setSyncMeta(meta: SyncMeta): void {
     estimates_only: meta.estimatesOnly ? 1 : 0,
     last_synced_at: meta.lastSyncedAt,
   });
+}
+
+const getInsightsStmt = db.prepare('SELECT json FROM insights WHERE id = 1');
+
+/** Metric-based findings captured at the last sync, or null before the first sync. */
+export function getInsights(): ProviderInsights | null {
+  const row = getInsightsStmt.get() as { json: string } | undefined;
+  if (!row) return null;
+  try {
+    return JSON.parse(row.json) as ProviderInsights;
+  } catch {
+    return null;
+  }
+}
+
+const setInsightsStmt = db.prepare(`
+  INSERT INTO insights (id, json, captured_at) VALUES (1, @json, @captured_at)
+  ON CONFLICT(id) DO UPDATE SET json = excluded.json, captured_at = excluded.captured_at
+`);
+
+export function setInsights(insights: ProviderInsights): void {
+  setInsightsStmt.run({ json: JSON.stringify(insights), captured_at: insights.capturedAt });
 }

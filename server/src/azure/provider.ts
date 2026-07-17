@@ -1,4 +1,4 @@
-import { ActivityEntry, JanitorResource } from '../types';
+import { ActivityEntry, JanitorResource, ProviderInsights } from '../types';
 
 /**
  * Every Azure SDK call sits behind this interface so the app can run
@@ -21,6 +21,11 @@ export interface IAzureProvider {
    * keyed by lower-cased resource id. Used when USE_CONSUMPTION_API=true.
    */
   getUsageDailyCosts?(): Promise<Map<string, number>>;
+  /**
+   * Metric-based dashboard findings: idle-CPU VMs, orphaned disks, zero-traffic
+   * apps and a daily cost series. Captured at sync time and persisted to SQLite.
+   */
+  getDashboardInsights?(): Promise<ProviderInsights>;
 }
 
 let provider: IAzureProvider | null = null;
