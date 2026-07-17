@@ -2,6 +2,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { CURRENCIES, formatMoney, setCurrency, useCurrency } from '@/lib/currency';
 import { useReclaimed } from '@/lib/session';
+import { Trash2 } from 'lucide-react';
 
 /** Top bar shared by every page: page title, subscription, currency and session total. */
 export function Header({
@@ -19,6 +20,9 @@ export function Header({
   return (
     <header className="flex items-center justify-between border-b bg-card/40 px-6 py-4">
       <div className="flex items-center gap-3">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15">
+          <Trash2 className="h-5 w-5 text-primary" />
+        </div>
         <div>
           <h1 className="text-lg font-semibold leading-tight">{title}</h1>
           <p className="text-xs text-muted-foreground">
