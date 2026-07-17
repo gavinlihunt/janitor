@@ -4,7 +4,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { RiskBadge } from '@/components/RiskBadge';
 import { api, type ActivityEntry, type ScoredResource } from '@/lib/api';
-import { fmtUsd, relativeTime } from '@/lib/format';
+import { formatMoney, useCurrency } from '@/lib/currency';
+import { relativeTime } from '@/lib/format';
 
 function ScoreBar({
   label,
@@ -45,6 +46,7 @@ function ScoreBar({
 
 export function DetailSheet({ resource, onClose }: { resource: ScoredResource | null; onClose: () => void }) {
   const [entries, setEntries] = useState<ActivityEntry[] | null>(null);
+  const currency = useCurrency();
 
   useEffect(() => {
     setEntries(null);
@@ -74,8 +76,9 @@ export function DetailSheet({ resource, onClose }: { resource: ScoredResource | 
                 <RiskBadge risk={resource.risk} score={resource.score} />
               </SheetTitle>
               <SheetDescription>
-                {resource.azureType} · {resource.resourceGroup} · {fmtUsd(resource.estDailyCostUsd)}/day
-                (estimated) · last activity {relativeTime(resource.lastActivity)}
+                {resource.azureType} · {resource.resourceGroup} ·{' '}
+                {formatMoney(resource.estDailyCostUsd, currency)}/day (estimated) · last activity{' '}
+                {relativeTime(resource.lastActivity)}
               </SheetDescription>
             </SheetHeader>
 

@@ -2,15 +2,23 @@ import { useEffect, useState } from 'react';
 import { Flame, MoonStar } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { fmtUsd } from '@/lib/format';
+import { formatMoney, useCurrency, type Currency } from '@/lib/currency';
 import type { Summary } from '@/lib/api';
 
 /**
  * Count-up on load, then ticks upward in real time at the idle daily burn
- * divided by 86,400 per second.
+ * divided by 86,400 per second. Amounts convert with the active currency.
  */
-function MoneyWasted({ base, perSecond }: { base: number; perSecond: number }) {
-  const [text, setText] = useState(fmtUsd(0));
+function MoneyWasted({
+  base,
+  perSecond,
+  currency,
+}: {
+  base: number;
+  perSecond: number;
+  currency: Currency;
+}) {
+  const [text, setText] = useState(formatMoney(0, currency));
 
   useEffect(() => {
     const start = performance.now();
@@ -19,17 +27,19 @@ function MoneyWasted({ base, perSecond }: { base: number; perSecond: number }) {
       const elapsed = (t - start) / 1000;
       const easeP = Math.min(1, elapsed / 1.5);
       const ease = 1 - Math.pow(1 - easeP, 3);
-      setText(fmtUsd((base + perSecond * elapsed) * ease));
+      setText(formatMoney((base + perSecond * elapsed) * ease, currency));
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [base, perSecond]);
+  }, [base, perSecond, currency]);
 
   return <span className="tabular-nums">{text}</span>;
 }
 
 export function HeroStrip({ summary }: { summary: Summary | null }) {
+  const currency = useCurrency();
+
   if (!summary) {
     return (
       <div className="grid gap-4 md:grid-cols-3">
@@ -48,7 +58,7 @@ export function HeroStrip({ summary }: { summary: Summary | null }) {
             <Flame className="h-4 w-4 text-amber-400" /> Daily burn rate
           </p>
           <p className="text-3xl font-semibold tabular-nums text-amber-400">
-            {fmtUsd(summary.dailyBurnRateUsd)}
+            {formatMoney(summary.dailyBurnRateUsd, currency)}
           </p>
           <p className="text-xs text-muted-foreground">
             across all resources{summary.estimatesOnly ? ', estimated' : ''}
@@ -60,10 +70,14 @@ export function HeroStrip({ summary }: { summary: Summary | null }) {
         <CardContent className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
           <p className="text-sm text-muted-foreground">Money wasted this month</p>
           <p className="text-4xl font-bold text-red-400">
-            <MoneyWasted base={summary.wasteThisMonthSoFarUsd} perSecond={summary.idleDailyBurnUsd / 86400} />
+            <MoneyWasted
+              base={summary.wasteThisMonthSoFarUsd}
+              perSecond={summary.idleDailyBurnUsd / 86400}
+              currency={currency}
+            />
           </p>
           <p className="text-xs text-muted-foreground">
-            heading for {fmtUsd(summary.monthlyWasteEstimateUsd)} over 30 days · estimate
+            heading for {formatMoney(summary.monthlyWasteEstimateUsd, currency)} over 30 days · estimate
           </p>
         </CardContent>
       </Card>
@@ -75,7 +89,7 @@ export function HeroStrip({ summary }: { summary: Summary | null }) {
           </p>
           <p className="text-3xl font-semibold tabular-nums">{summary.idleResourceCount}</p>
           <p className="text-xs text-muted-foreground">
-            potential savings {fmtUsd(summary.potentialDailySavingsUsd)}/day
+            potential savings {formatMoney(summary.potentialDailySavingsUsd, currency)}/day
           </p>
         </CardContent>
       </Card>

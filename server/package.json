@@ -18,7 +18,7 @@
     "@azure/arm-monitor": "^7.0.0",
     "@azure/arm-resources": "^5.2.0",
     "@azure/identity": "^4.4.1",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^11.10.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2"

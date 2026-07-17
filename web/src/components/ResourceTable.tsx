@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowDown, Lock, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Lock, Trash2 } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -19,10 +19,20 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { AnimatedNumber } from '@/components/AnimatedNumber';
 import { RiskBadge } from '@/components/RiskBadge';
 import { TypeIcon } from '@/components/TypeIcon';
-import { fmtUsd, relativeTime } from '@/lib/format';
+import { formatMoney, useCurrency } from '@/lib/currency';
+import { relativeTime } from '@/lib/format';
 import type { ScoredResource } from '@/lib/api';
 
-export type SortKey = 'score' | 'cost';
+export type SortKey = 'name' | 'type' | 'cost' | 'lastActivity' | 'risk';
+export interface SortState {
+  key: SortKey;
+  dir: 'asc' | 'desc';
+}
+
+/** Numeric fields read best highest-first; text and dates default ascending. */
+export function defaultDir(key: SortKey): 'asc' | 'desc' {
+  return key === 'cost' || key === 'risk' ? 'desc' : 'asc';
+}
 
 function isHibernated(r: ScoredResource): boolean {
   if (r.kind === 'vm') return r.state === 'deallocated';
@@ -39,6 +49,7 @@ function HibernateCell({
   onHibernate: (r: ScoredResource) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
+  const currency = useCurrency();
   const hibernated = isHibernated(resource);
   const disabled = !resource.canHibernate || resource.isProtected || hibernated || busy;
   const reason = resource.isProtected
@@ -47,7 +58,7 @@ function HibernateCell({
       ? 'This resource kind cannot be hibernated'
       : hibernated
         ? 'Already hibernated'
-        : `Scale down to save ${fmtUsd(Math.max(resource.estDailyCostUsd - resource.estHibernatedDailyCostUsd, 0))}/day`;
+        : `Scale down to save ${formatMoney(Math.max(resource.estDailyCostUsd - resource.estHibernatedDailyCostUsd, 0), currency)}/day`;
 
   return (
     <Tooltip>
@@ -121,6 +132,7 @@ function TeardownCell({
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
+  const currency = useCurrency();
 
   if (resource.isProtected) {
     return (
@@ -161,8 +173,10 @@ function TeardownCell({
           <AlertDialogTitle>Tear down {resource.name}?</AlertDialogTitle>
           <AlertDialogDescription>
             This permanently deletes the resource and reclaims an estimated{' '}
-            <span className="font-medium text-red-400">{fmtUsd(resource.estDailyCostUsd)}/day</span>. Type{' '}
-            <span className="font-mono text-foreground">{resource.name}</span> to confirm.
+            <span className="font-medium text-red-400">
+              {formatMoney(resource.estDailyCostUsd, currency)}/day
+            </span>
+            . Type <span className="font-mono text-foreground">{resource.name}</span> to confirm.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <Input
@@ -204,48 +218,62 @@ export function ResourceTable({
   onTeardown,
   onSetInUse,
   onSelect,
+  readOnly = false,
 }: {
   resources: ScoredResource[];
   loading: boolean;
-  sort: SortKey;
-  onSortChange: (s: SortKey) => void;
-  removingIds: Set<string>;
-  onHibernate: (r: ScoredResource) => Promise<void>;
-  onTeardown: (r: ScoredResource, confirm: string) => Promise<void>;
-  onSetInUse: (r: ScoredResource, inUse: boolean) => Promise<void>;
+  sort: SortState;
+  onSortChange: (s: SortState) => void;
+  removingIds?: Set<string>;
+  onHibernate?: (r: ScoredResource) => Promise<void>;
+  onTeardown?: (r: ScoredResource, confirm: string) => Promise<void>;
+  onSetInUse?: (r: ScoredResource, inUse: boolean) => Promise<void>;
   onSelect: (r: ScoredResource) => void;
+  /** Hide the In-use, Hibernate, and Actions columns. */
+  readOnly?: boolean;
 }) {
-  const sortButton = (key: SortKey, label: string) => (
-    <button
-      className={`inline-flex items-center gap-1 hover:text-foreground ${sort === key ? 'text-foreground' : ''}`}
-      onClick={() => onSortChange(key)}
-    >
-      {label}
-      {sort === key && <ArrowDown className="h-3 w-3" />}
-    </button>
-  );
+  const currency = useCurrency();
+  // Action columns need their handlers; drop them (and their columns) in read-only mode.
+  const showActions = !readOnly && !!onSetInUse && !!onHibernate && !!onTeardown;
+  const colCount = 7 + (showActions ? 3 : 0);
+
+  const sortButton = (key: SortKey, label: string) => {
+    const active = sort.key === key;
+    return (
+      <button
+        className={`inline-flex items-center gap-1 hover:text-foreground ${active ? 'text-foreground' : ''}`}
+        onClick={() =>
+          onSortChange(active ? { key, dir: sort.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: defaultDir(key) })
+        }
+      >
+        {label}
+        {active && (sort.dir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)}
+      </button>
+    );
+  };
 
   return (
     <div className="rounded-xl border bg-card">
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            <TableHead>Name</TableHead>
-            <TableHead className="w-10">Type</TableHead>
+            <TableHead>{sortButton('name', 'Name')}</TableHead>
+            <TableHead className="w-10">{sortButton('type', 'Type')}</TableHead>
             <TableHead>Resource group</TableHead>
             <TableHead>Tier / SKU</TableHead>
             <TableHead className="text-right">{sortButton('cost', 'Est. cost/day')}</TableHead>
-            <TableHead>Last activity</TableHead>
-            <TableHead>{sortButton('score', 'Risk')}</TableHead>
-            <TableHead className="text-center">In use</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
+            <TableHead>{sortButton('lastActivity', 'Last activity')}</TableHead>
+            <TableHead>{sortButton('risk', 'Risk')}</TableHead>
+            {showActions && <TableHead className="text-center">In use</TableHead>}
+            {showActions && <TableHead className="text-center">Hibernate</TableHead>}
+            {showActions && <TableHead className="text-right">Actions</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
           {loading
             ? Array.from({ length: 8 }, (_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 9 }, (_, j) => (
+                  {Array.from({ length: colCount }, (_, j) => (
                     <TableCell key={j}>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
@@ -255,7 +283,7 @@ export function ResourceTable({
             : resources.map((r) => (
                 <TableRow
                   key={r.id}
-                  className={`cursor-pointer ${removingIds.has(r.id) ? 'animate-row-out' : ''}`}
+                  className={`cursor-pointer ${removingIds?.has(r.id) ? 'animate-row-out' : ''}`}
                   onClick={() => onSelect(r)}
                 >
                   <TableCell className="font-medium">
@@ -280,7 +308,10 @@ export function ResourceTable({
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span>
-                          <AnimatedNumber value={r.estDailyCostUsd} format={fmtUsd} />
+                          <AnimatedNumber
+                            value={r.estDailyCostUsd}
+                            format={(v) => formatMoney(v, currency)}
+                          />
                         </span>
                       </TooltipTrigger>
                       <TooltipContent>Estimated from a static price map</TooltipContent>
@@ -290,20 +321,26 @@ export function ResourceTable({
                   <TableCell>
                     <RiskBadge risk={r.risk} score={r.score} />
                   </TableCell>
-                  <TableCell className="text-center">
-                    <InUseCell resource={r} onSetInUse={onSetInUse} />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <span className="inline-flex items-center gap-2">
-                      <HibernateCell resource={r} onHibernate={onHibernate} />
-                      <TeardownCell resource={r} onTeardown={onTeardown} />
-                    </span>
-                  </TableCell>
+                  {showActions && (
+                    <TableCell className="text-center">
+                      <InUseCell resource={r} onSetInUse={onSetInUse!} />
+                    </TableCell>
+                  )}
+                  {showActions && (
+                    <TableCell className="text-center">
+                      <HibernateCell resource={r} onHibernate={onHibernate!} />
+                    </TableCell>
+                  )}
+                  {showActions && (
+                    <TableCell className="text-right">
+                      <TeardownCell resource={r} onTeardown={onTeardown!} />
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
           {!loading && resources.length === 0 && (
             <TableRow>
-              <TableCell colSpan={9} className="py-10 text-center text-muted-foreground">
+              <TableCell colSpan={colCount} className="py-10 text-center text-muted-foreground">
                 No resources yet. Click Refresh to import from Azure, or the filter may be too narrow.
               </TableCell>
             </TableRow>
