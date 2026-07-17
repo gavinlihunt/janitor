@@ -46,6 +46,16 @@ export function estimateDailyCost(r: JanitorResource): number {
   }
 }
 
+/**
+ * Resolve a resource's daily USD cost. When a live cost map is present (the
+ * Consumption/Cost Management query succeeded) use it, treating an absent resource
+ * as zero billed usage rather than an estimate. Fall back to the price map only
+ * when no live data is available. Shared by the sync job and action reconciliation.
+ */
+export function resolveDailyCost(r: JanitorResource, usage: Map<string, number> | null): number {
+  return round2(usage ? usage.get(r.id.toLowerCase()) ?? 0 : estimateDailyCost(r));
+}
+
 export function canHibernate(kind: ResourceKind): boolean {
   return kind === 'vm' || kind === 'appServicePlan' || kind === 'cosmos';
 }

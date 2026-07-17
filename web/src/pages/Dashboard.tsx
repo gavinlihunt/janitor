@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DetailSheet } from '@/components/DetailSheet';
 import { Header } from '@/components/Header';
@@ -30,6 +32,7 @@ export default function Dashboard() {
   const [selected, setSelected] = useState<ScoredResource | null>(null);
   const [removing, setRemoving] = useState<Set<string>>(new Set());
   const [sessionDailyUsd, setSessionDailyUsd] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
 
   const refreshTotals = useCallback(async () => {
     try {
@@ -41,29 +44,53 @@ export default function Dashboard() {
     }
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const [s, g, r] = await Promise.all([
-          api.summary(),
-          api.resourceGroups(),
-          api.resources({ sort, rg }),
-        ]);
-        if (cancelled) return;
-        setSummary(s);
-        setGroups(g);
-        setResources(r);
-      } catch (err) {
-        if (!cancelled) toast.error(err instanceof Error ? err.message : 'Failed to load data');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [s, g, r] = await Promise.all([
+        api.summary(),
+        api.resourceGroups(),
+        api.resources({ sort, rg }),
+      ]);
+      setSummary(s);
+      setGroups(g);
+      setResources(r);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load data');
+    } finally {
+      setLoading(false);
+    }
   }, [sort, rg]);
+
+  useEffect(() => {
+    void loadAll();
+  }, [loadAll]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await api.sync();
+      await loadAll();
+      toast.success('Imported the latest data from Azure');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Refresh failed');
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadAll]);
+
+  const handleSetInUse = useCallback(
+    async (r: ScoredResource, inUse: boolean) => {
+      try {
+        const { resource } = await api.setInUse(r.id, inUse);
+        setResources((prev) => prev.map((x) => (x.id === r.id ? resource : x)));
+        void refreshTotals();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Failed to update the in-use flag');
+      }
+    },
+    [refreshTotals]
+  );
 
   const handleHibernate = useCallback(
     async (r: ScoredResource) => {
@@ -127,11 +154,22 @@ export default function Dashboard() {
               ))}
             </TabsList>
           </Tabs>
-          <p className="text-xs text-muted-foreground">
-            {summary?.estimatesOnly
-              ? 'All figures are estimates from a static price map'
-              : 'Figures from the Azure Consumption API'}
-          </p>
+          <div className="flex items-center gap-3">
+            <p className="text-xs text-muted-foreground">
+              {summary?.estimatesOnly
+                ? 'All figures are estimates from a static price map'
+                : 'Figures from the Azure Consumption API'}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void handleRefresh()}
+              disabled={refreshing}
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </Button>
+          </div>
         </div>
 
         <ResourceTable
@@ -142,6 +180,7 @@ export default function Dashboard() {
           removingIds={removing}
           onHibernate={handleHibernate}
           onTeardown={handleTeardown}
+          onSetInUse={handleSetInUse}
           onSelect={setSelected}
         />
       </main>

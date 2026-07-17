@@ -74,6 +74,43 @@ function HibernateCell({
   );
 }
 
+function InUseCell({
+  resource,
+  onSetInUse,
+}: {
+  resource: ScoredResource;
+  onSetInUse: (r: ScoredResource, inUse: boolean) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
+          <Switch
+            checked={resource.inUse}
+            disabled={busy}
+            aria-label={`Mark ${resource.name} as in use`}
+            onCheckedChange={async (checked) => {
+              setBusy(true);
+              try {
+                await onSetInUse(resource, checked);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        {resource.inUse
+          ? 'Marked in use: excluded from waste and protected from actions'
+          : 'Mark as in use to exclude it from waste and protect it'}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 function TeardownCell({
   resource,
   onTeardown,
@@ -165,6 +202,7 @@ export function ResourceTable({
   removingIds,
   onHibernate,
   onTeardown,
+  onSetInUse,
   onSelect,
 }: {
   resources: ScoredResource[];
@@ -174,6 +212,7 @@ export function ResourceTable({
   removingIds: Set<string>;
   onHibernate: (r: ScoredResource) => Promise<void>;
   onTeardown: (r: ScoredResource, confirm: string) => Promise<void>;
+  onSetInUse: (r: ScoredResource, inUse: boolean) => Promise<void>;
   onSelect: (r: ScoredResource) => void;
 }) {
   const sortButton = (key: SortKey, label: string) => (
@@ -198,6 +237,7 @@ export function ResourceTable({
             <TableHead className="text-right">{sortButton('cost', 'Est. cost/day')}</TableHead>
             <TableHead>Last activity</TableHead>
             <TableHead>{sortButton('score', 'Risk')}</TableHead>
+            <TableHead className="text-center">In use</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
@@ -205,7 +245,7 @@ export function ResourceTable({
           {loading
             ? Array.from({ length: 8 }, (_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 8 }, (_, j) => (
+                  {Array.from({ length: 9 }, (_, j) => (
                     <TableCell key={j}>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
@@ -250,6 +290,9 @@ export function ResourceTable({
                   <TableCell>
                     <RiskBadge risk={r.risk} score={r.score} />
                   </TableCell>
+                  <TableCell className="text-center">
+                    <InUseCell resource={r} onSetInUse={onSetInUse} />
+                  </TableCell>
                   <TableCell className="text-right">
                     <span className="inline-flex items-center gap-2">
                       <HibernateCell resource={r} onHibernate={onHibernate} />
@@ -260,8 +303,8 @@ export function ResourceTable({
               ))}
           {!loading && resources.length === 0 && (
             <TableRow>
-              <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
-                No resources found. Either the janitor already cleaned up, or the filter is too narrow.
+              <TableCell colSpan={9} className="py-10 text-center text-muted-foreground">
+                No resources yet. Click Refresh to import from Azure, or the filter may be too narrow.
               </TableCell>
             </TableRow>
           )}

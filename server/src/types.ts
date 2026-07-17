@@ -56,8 +56,18 @@ export interface ScoreBreakdown {
   total: number;
 }
 
-export interface ScoredResource extends JanitorResource {
+/**
+ * A resource as persisted in SQLite: the raw Azure fields plus the cost resolved
+ * at sync time and the user-managed inUse flag. This is the read source for the
+ * API layer, which scores and enriches it into a ScoredResource.
+ */
+export interface StoredResource extends JanitorResource {
   estDailyCostUsd: number;
+  /** User-set: true means "this is genuinely in use", excluding it from waste and protecting it. */
+  inUse: boolean;
+}
+
+export interface ScoredResource extends StoredResource {
   estHibernatedDailyCostUsd: number;
   canHibernate: boolean;
   score: number;
