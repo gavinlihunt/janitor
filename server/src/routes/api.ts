@@ -18,7 +18,11 @@ function enrich(r: JanitorResource, usage: Map<string, number> | null): ScoredRe
   const prot = protection(r);
   return {
     ...r,
-    estDailyCostUsd: round2(usage?.get(r.id.toLowerCase()) ?? estimateDailyCost(r)),
+    // When the live cost query succeeded (usage present) use its figure, and treat
+    // a resource absent from the results as zero billed usage rather than silently
+    // substituting a price-map estimate. Estimates apply only when the whole query
+    // was unavailable (usage null), which also sets estimatesOnly on the summary.
+    estDailyCostUsd: round2(usage ? usage.get(r.id.toLowerCase()) ?? 0 : estimateDailyCost(r)),
     estHibernatedDailyCostUsd: round2(estimateHibernatedDailyCost(r)),
     canHibernate: canHibernate(r.kind),
     score: breakdown.total,

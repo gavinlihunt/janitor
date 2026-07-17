@@ -4,7 +4,7 @@ import { MonitorClient } from '@azure/arm-monitor';
 import { ComputeManagementClient } from '@azure/arm-compute';
 import { WebSiteManagementClient } from '@azure/arm-appservice';
 import { CosmosDBManagementClient } from '@azure/arm-cosmosdb';
-import { ConsumptionManagementClient } from '@azure/arm-consumption';
+import { CostManagementClient } from '@azure/arm-costmanagement';
 import { IAzureProvider } from './provider';
 import { HttpError } from '../services/actions';
 import { ActivityEntry, JanitorResource, ResourceKind } from '../types';
@@ -12,7 +12,6 @@ import { ActivityEntry, JanitorResource, ResourceKind } from '../types';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ACTIVITY_WINDOW_DAYS = 90;
 const MAX_ACTIVITY_EVENTS = 2000;
-const MAX_USAGE_ITEMS = 5000;
 
 // Child/noise resource types that would clutter the dashboard.
 const EXCLUDED_TYPES = new Set([
@@ -244,27 +243,64 @@ export class LiveAzureProvider implements IAzureProvider {
     }
   }
 
-  /** Real figures via the Consumption API (USE_CONSUMPTION_API=true). */
+  /**
+   * Real figures via the Cost Management Query API (USE_CONSUMPTION_API=true).
+   *
+   * The query aggregates cost server-side, grouped by resource id, so it returns
+   * one compact row per resource rather than the tens of thousands of raw
+   * usage-detail line items the Consumption API emits. That removes the previous
+   * 5000-item truncation, which combined with Azure's unstable page ordering made
+   * the per-resource totals jump between calls. Cost is summed over the trailing
+   * window and divided by the window length, so the map holds a trailing-window
+   * average daily cost keyed by lower-cased resource id.
+   */
   async getUsageDailyCosts(): Promise<Map<string, number>> {
-    const consumption = new ConsumptionManagementClient(this.credential, this.subscriptionId);
+    const client = new CostManagementClient(this.credential);
     const scope = `/subscriptions/${this.subscriptionId}`;
     const windowDays = 30;
-    const since = new Date(Date.now() - windowDays * DAY_MS).toISOString().slice(0, 10);
-    const totals = new Map<string, number>();
-    let count = 0;
-    for await (const item of consumption.usageDetails.list(scope, {
-      filter: `properties/usageStart ge '${since}'`,
-      top: 1000,
-    })) {
-      if (++count > MAX_USAGE_ITEMS) break;
-      const u = item as Record<string, any>;
-      const rid = String(u.instanceId ?? u.resourceId ?? '').toLowerCase();
-      const cost = Number(u.costInBillingCurrency ?? u.cost ?? u.pretaxCost ?? 0);
-      if (!rid || !Number.isFinite(cost)) continue;
-      totals.set(rid, (totals.get(rid) ?? 0) + cost);
+    const to = new Date();
+    const from = new Date(to.getTime() - windowDays * DAY_MS);
+
+    const result = await client.query.usage(scope, {
+      type: 'ActualCost',
+      timeframe: 'Custom',
+      timePeriod: { from, to },
+      dataset: {
+        granularity: 'None',
+        // Prefer CostUSD so the figure is in USD regardless of the billing
+        // currency; the actual column is resolved by name below.
+        aggregation: { totalCost: { name: 'CostUSD', function: 'Sum' } },
+        grouping: [{ type: 'Dimension', name: 'ResourceId' }],
+      },
+    });
+    if (!result) return new Map();
+
+    // Grouping by ResourceId yields one row per resource, so results comfortably
+    // fit a single page for normal subscriptions. Flag rather than silently drop
+    // data if a very large subscription still paginates.
+    if (result.nextLink) {
+      console.warn(
+        '[azure-janitor] cost query returned more rows than one page; some resource costs may be incomplete'
+      );
     }
+
+    const columns = (result.columns ?? []).map((c) => String(c.name ?? ''));
+    const idIdx = columns.findIndex((n) => /^resourceid$/i.test(n));
+    const costIdx = columns.findIndex((n) => /^costusd$/i.test(n));
+    const fallbackCostIdx = columns.findIndex((n) => /^(cost|pretaxcost)$/i.test(n));
+    const useCostIdx = costIdx >= 0 ? costIdx : fallbackCostIdx;
+
     const daily = new Map<string, number>();
-    for (const [rid, total] of totals) daily.set(rid, total / windowDays);
+    if (idIdx < 0 || useCostIdx < 0) {
+      console.warn('[azure-janitor] cost query response missing expected columns:', columns);
+      return daily;
+    }
+    for (const row of result.rows ?? []) {
+      const rid = String(row[idIdx] ?? '').toLowerCase();
+      const total = Number(row[useCostIdx] ?? 0);
+      if (!rid || !Number.isFinite(total)) continue;
+      daily.set(rid, (daily.get(rid) ?? 0) + total / windowDays);
+    }
     return daily;
   }
 

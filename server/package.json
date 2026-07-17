@@ -13,8 +13,8 @@
   "dependencies": {
     "@azure/arm-appservice": "^15.0.0",
     "@azure/arm-compute": "^22.1.0",
-    "@azure/arm-consumption": "^9.2.0",
     "@azure/arm-cosmosdb": "^16.2.0",
+    "@azure/arm-costmanagement": "^1.0.0",
     "@azure/arm-monitor": "^7.0.0",
     "@azure/arm-resources": "^5.2.0",
     "@azure/identity": "^4.4.1",
