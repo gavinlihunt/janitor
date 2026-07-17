@@ -12,8 +12,8 @@ export function Header({ summary }: { summary: Summary | null }) {
   return (
     <header className="flex items-center justify-between border-b bg-card/40 px-6 py-4">
       <div className="flex items-center gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-500/15">
-          <Trash2 className="h-5 w-5 text-red-400" />
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15">
+          <Trash2 className="h-5 w-5 text-primary" />
         </div>
         <div>
           <h1 className="text-lg font-semibold leading-tight">Azure Janitor</h1>

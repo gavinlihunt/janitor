@@ -4,25 +4,26 @@
 
 @layer base {
   :root {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 8% 6%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 4.5%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
+    /* Horizon UI dark palette: deep navy surfaces with a purple primary accent. */
+    --background: 228 67% 13%;
+    --foreground: 0 0% 100%;
+    --card: 227 60% 17%;
+    --card-foreground: 0 0% 100%;
+    --popover: 227 57% 15%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 251 100% 55%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 226 47% 22%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 226 47% 20%;
+    --muted-foreground: 225 35% 73%;
+    --accent: 226 47% 24%;
+    --accent-foreground: 0 0% 100%;
     --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 226 40% 23%;
+    --input: 226 40% 23%;
+    --ring: 250 100% 66%;
     --radius: 0.5rem;
   }
 
@@ -33,5 +34,32 @@
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: 'tnum';
+  }
+
+  /* Thin, theme-aware scrollbars so overflow areas (modal, side panel, page)
+     match the dark UI instead of showing the chunky native bar. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.5);
   }
 }
